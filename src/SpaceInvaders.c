@@ -5,11 +5,11 @@
 SDL_Surface * screen;
 SDL_Event ev;
 
-u8 dip1 = 0X01;
-u8 dip2 = 0x00;
+u8 dip1 = 0X00;
+u8 dip2 = 0x01;
 
-u16 shiftReg;
-u16 shiftOff;
+u16 shiftReg = 0x0000;
+u16 shiftOff = 0x0000;
 
 u8 spaceInvaders_portIn (int port)
 {
@@ -19,6 +19,7 @@ u8 spaceInvaders_portIn (int port)
 		case 2:
 			return dip2;
 		case 3:
+			printf("Read shift port %#x\n", (shiftReg << shiftOff) >> 8);
 			return (shiftReg << shiftOff) >> 8;
 		default:
 			while (1);
@@ -31,8 +32,10 @@ void spaceInvaders_portOut (int port, u8 value)
 {
 	switch (port) {
 		case 2:
+			printf("Write shift off %#x\n", value);
 			shiftOff = value; break;
 		case 4:
+			printf("Read shift value %#x\n", (shiftReg >> 8) | value);
 			shiftReg = (shiftReg >> 8) | value; break;
 		default:
 			break;
@@ -41,6 +44,26 @@ void spaceInvaders_portOut (int port, u8 value)
 
 void spaceInvaders_vblank ()
 {	
+	int vramPtr, b;
+
+	SDL_LockSurface(screen);
+	
+	u8 *screenPtr = screen->pixels;
+
+	for (vramPtr = 0; vramPtr < 0x4000 - 0x2400; vramPtr++) { 
+		for (b=0;b<8;b++) {
+			*screenPtr = ((e8080.ram[0x2400 + vramPtr] >> (b)) & 1) ? 0xFF : 0x00; 
+			screenPtr++;
+		}
+	}
+	
+	SDL_UnlockSurface(screen);
+	
+	SDL_Flip(screen);
+}
+
+void spaceInvaders_update_input ()
+{
 	dip1 = 0x00;
 
 	while (SDL_PollEvent(&ev)) {
@@ -67,20 +90,6 @@ void spaceInvaders_vblank ()
 				break;
 		}
 	}
-
-	SDL_LockSurface(screen);
-	
-	u8 *screenPtr = screen->pixels;
-	int p;
-	for (p = 0;p < 0x4000 - 0x2400; p++) { 
-		u8 x = e8080.ram[0x2400 + p]; 
-		int b;
-		for (b=0;b<8;b++) {
-			*screenPtr = ((x >> (7 - b)) & 1) ? 0xFF : 0x00; screenPtr++;
-		}
-	}
-	
-	SDL_UnlockSurface(screen);
 }
 
 int main(int argc, char *argv[])
@@ -113,8 +122,8 @@ int main(int argc, char *argv[])
 		spaceInvaders_vblank();	
 		emulate8080(17000);
 		causeInt(0x10);
-		SDL_Delay(16);
-		SDL_Flip(screen);
+		spaceInvaders_update_input();
+		SDL_Delay(20);
 	}
 	
 	return 1;
