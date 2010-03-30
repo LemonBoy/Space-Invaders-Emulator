@@ -1,0 +1,12 @@
+OMGALIENZATEMYLEM0N aka Space Invaders Emulator
+
+Coded by The Lemon Man (aka lem0nboy) (2010)
+
+To put it plainly features my Intel 8080 emu
+written from scratch, some Space Invaders specific
+hardware and a video interface using SDL.
+
+Thanks to:
+- Intel for making the 8080 and making the docs available
+- Emutalk forum for docs
+- #hackerchannel on freenode for everything else
