@@ -27,7 +27,7 @@ int emulate8080 (int cycles)
 			printf("Halted!\n");
 			break;
 		}
-		
+
 		u8 opcode = fetch8();
 		
 		opTbl[opcode].execute (opcode);

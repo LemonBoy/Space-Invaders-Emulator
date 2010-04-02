@@ -4,6 +4,8 @@
 #include "8080Core.h"
 #include "8080Memory.h"
 
+#define FASTSWAP(X1,X2) X1 ^= X2; X2 ^= X1; X1 ^= X2
+
 /*
  * Pipeline fetching
 */
@@ -383,11 +385,7 @@ inline void DCX (u8 opcode)
 
 inline void XCHG (u8 opcode)
 {
-	u16 tmp1, tmp2;
-	tmp1 = e8080.DE;
-	tmp2 = e8080.HL;
-	e8080.DE = e8080.HL;
-	e8080.HL = e8080.DE;
+	FASTSWAP(e8080.DE, e8080.HL);
 }
 
 inline void XTHL (u8 opcode)

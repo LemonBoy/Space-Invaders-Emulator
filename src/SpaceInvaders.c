@@ -19,7 +19,6 @@ u8 spaceInvaders_portIn (int port)
 		case 2:
 			return dip2;
 		case 3:
-			printf("Read shift port %#x\n", (shiftReg << shiftOff) >> 8);
 			return (shiftReg << shiftOff) >> 8;
 		default:
 			while (1);
@@ -32,11 +31,9 @@ void spaceInvaders_portOut (int port, u8 value)
 {
 	switch (port) {
 		case 2:
-			printf("Write shift off %#x\n", value);
 			shiftOff = value; break;
 		case 4:
-			printf("Read shift value %#x\n", (shiftReg >> 8) | value);
-			shiftReg = (shiftReg >> 8) | value; break;
+			shiftReg = (shiftReg << 8) | value; break;
 		default:
 			break;
 	}
