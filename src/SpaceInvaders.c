@@ -5,11 +5,39 @@
 SDL_Surface * screen;
 SDL_Event ev;
 
-u8 dip1 = 0X00;
-u8 dip2 = 0x01;
+u8 dip1 = 0x01;
+u8 dip2 = 0x00;
 
 u16 shiftReg = 0x0000;
 u16 shiftOff = 0x0000;
+
+ramBank wram8080[4] =
+{
+	{ 0x0000,
+	  0x1FFF,
+	  0x0000,
+	  FLAG_ROM,
+	  NULL
+	},
+	{ 0x2000,
+	  0x0400,
+	  0x0000,
+	  FLAG_USED,
+	  NULL
+	},
+	{ 0x2400,
+	  0x1C00,
+	  0x0000,
+	  FLAG_USED,
+	  NULL
+	},
+	{ 0x4000,
+	  0xFFFF,
+	  0x2000,
+	  FLAG_MIRROR,
+	  NULL
+	},	 
+};
 
 u8 spaceInvaders_portIn (int port)
 {
@@ -49,7 +77,7 @@ void spaceInvaders_vblank ()
 
 	for (vramPtr = 0; vramPtr < 0x4000 - 0x2400; vramPtr++) { 
 		for (b=0;b<8;b++) {
-			*screenPtr = ((e8080.ram[0x2400 + vramPtr] >> (b)) & 1) ? 0xFF : 0x00; 
+			*screenPtr = ((readByte(0x2400 + vramPtr) >> b)&1) ? 0xFF : 0x00; 
 			screenPtr++;
 		}
 	}
@@ -61,22 +89,20 @@ void spaceInvaders_vblank ()
 
 void spaceInvaders_update_input ()
 {
-	dip1 = 0x00;
-
 	while (SDL_PollEvent(&ev)) {
 		switch (ev.type) {
 			case SDL_KEYDOWN:
 				switch(ev.key.keysym.sym) {
-					case SDLK_UP:
-						dip1 |= (1 << 4); break;
-					case SDLK_DOWN:	
-						dip1 |= (1 << 2); break;
 					case SDLK_LEFT:
 						dip1 |= (1 << 5); break;
 					case SDLK_RIGHT:
 						dip1 |= (1 << 6); break;
 					case SDLK_c:
 						dip1 |= (1 << 0); break;
+					case SDLK_x:
+						dip1 |= (1 << 2); break;
+					case SDLK_z:
+						dip1 |= (1 << 4); break;						
 					default:
 						break;
 				} break;
@@ -113,14 +139,14 @@ int main(int argc, char *argv[])
 	e8080.portOut = spaceInvaders_portOut;
 	
 	while (!e8080.halt)
-	{
-		emulate8080(17000);
-		causeInt(0x8);		
+	{		
+		emulate8080(28527);
+		causeInt(8);		
 		spaceInvaders_vblank();	
-		emulate8080(17000);
-		causeInt(0x10);
+		emulate8080(4839);
+		causeInt(16);
 		spaceInvaders_update_input();
-		SDL_Delay(20);
+		SDL_Delay(15);		
 	}
 	
 	return 1;

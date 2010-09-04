@@ -23,13 +23,9 @@ u16 fetch16 ()
 
 inline void setFlags (u32 reg, int fMask)
 {
-	//int t;
-	//for (t=0;t<8;t++) { printf("%02x ", e8080.F & (1 >> (7 - t))); } printf("\n");
-
 	e8080.F &= ~(fMask);
-	
-	//for (t=0;t<8;t++) { printf("%02x ", e8080.F & (1 >> (7 - t))); } printf("\n");
-	
+	reg &= 0xFFFF;
+
 	if (fMask & FLAG_SIGN)
 	{ 
 		if (reg & (1 << 7)) {
@@ -574,7 +570,7 @@ inline void JP (u8 opcode)
 
 inline void JPE (u8 opcode)
 {
-	if (e8080.F & FLAG_PARITY) {
+	if (!(e8080.F & FLAG_PARITY)) {
 		JMP(opcode);
 	} else {
 		e8080.PC += 2;
@@ -583,7 +579,7 @@ inline void JPE (u8 opcode)
 
 inline void JPO (u8 opcode)
 {
-	if (!(e8080.F & FLAG_PARITY)) {
+	if (e8080.F & FLAG_PARITY) {		
 		JMP(opcode);
 	} else {
 		e8080.PC += 2;
@@ -595,6 +591,8 @@ inline void CALL (u8 opcode)
 	u16 addr = fetch16();
 	stackPush(e8080.PC);
 	e8080.PC = addr;
+	/*if (e8080.PC == 0x100)
+		die("NOW");*/
 }
 
 inline void CC (u8 opcode)
@@ -653,7 +651,7 @@ inline void CP (u8 opcode)
 
 inline void CPE (u8 opcode)
 {
-	if (e8080.F & FLAG_PARITY) {
+	if (!(e8080.F & FLAG_PARITY)) {
 		CALL(opcode);
 	} else {
 		e8080.PC += 2;
@@ -662,7 +660,7 @@ inline void CPE (u8 opcode)
 
 inline void CPO (u8 opcode)
 {
-	if (!(e8080.F & FLAG_PARITY)) {
+	if (e8080.F & FLAG_PARITY) {
 		CALL(opcode);
 	} else {
 		e8080.PC += 2;
@@ -718,14 +716,14 @@ inline void RP (u8 opcode)
 
 inline void RPE (u8 opcode)
 {
-	if (e8080.F & FLAG_PARITY) {
+	if (!(e8080.F & FLAG_PARITY)) {
 		RET(opcode);
 	}
 }
 
 inline void RPO (u8 opcode)
 {
-	if (!(e8080.F & FLAG_PARITY)) {
+	if (e8080.F & FLAG_PARITY) {
 		RET(opcode);
 	}
 }
@@ -765,7 +763,7 @@ static struct
 {
 	void (* execute) (u8 opcode);
 	int cycles;
-} opTbl [0X100] = {
+} opTbl [0x100] = {
 	{  NOP, 4},
 	{  LXI, 10},
 	{  STAX, 7},
@@ -781,8 +779,8 @@ static struct
 	{  INR, 5},
 	{  DCR, 5},
 	{  MVI, 7},
-	{  RRC, 4}, // 0x10
-	{  NOP, 4},
+	{  RRC, 4},
+	{  NOP, 4}, // 0x10
 	{  LXI, 10},
 	{  STAX, 7},
 	{  INX, 5},

@@ -1,4 +1,4 @@
-OBJS = src/8080Core.c src/spaceInvaders.c
+OBJS = src/8080Core.c src/SpaceInvaders.c
 #
 all:
-	gcc $(OBJS) -O3 -Wall `sdl-config --cflags --libs` -o SpaceInvaders.exe
+	gcc $(OBJS) -g -O3 -Wall `sdl-config --cflags --libs` -o spaceinvaders
