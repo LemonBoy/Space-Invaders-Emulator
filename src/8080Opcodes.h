@@ -1,68 +1,71 @@
 #ifndef E8080OPCODES_H
 #define E8080OPCODES_H
 
-#include "8080Core.h"
-#include "8080Memory.h"
-
-#define FASTSWAP(X1,X2) X1 ^= X2; X2 ^= X1; X1 ^= X2
-
-/*
- * Pipeline fetching
-*/
-
-u8 fetch8 ()
+uint8_t fetch8 ()
 {
+	if (e8080.PC >= 0x9000) {
+		assert(0);
+		dumpRegisters();
+	}
 	return readByte(e8080.PC++);
 }
 
-u16 fetch16 ()
+uint16_t fetch16 ()
 {
-	u16 r = fetch8() | fetch8() << 8 ;
+	uint16_t r = fetch8() | fetch8() << 8 ;
 	return r;
 }
 
-inline void setFlags (u32 reg, int fMask)
+void setFlags (uint32_t reg, int fMask)
 {
-	e8080.F &= ~(fMask);
+	e8080.F &= ~((1 << 5) | (1 << 3) | fMask);
+	e8080.F |= 0x02;
 	reg &= 0xFFFF;
 
 	if (fMask & FLAG_SIGN)
-	{ 
+	{
 		if (reg & (1 << 7)) {
 			e8080.F |= FLAG_SIGN;
 		}
 	}
-	
+
 	if (fMask & FLAG_ZERO)
-	{ 
-		if (!reg) {
+	{
+		if (!(reg&0xff)) {
 			e8080.F |= FLAG_ZERO;
 		}
 	}
-	
+
 	if (fMask & FLAG_CARRY)
-	{ 
+	{
 		if ((reg & 0x100) != 0) {
 			e8080.F |= FLAG_CARRY;
 		}
 	}
-	
+
 	if (fMask & FLAG_ACARRY)
-	{ 
+	{
 		if ((e8080.A & 0xf) > (reg & 0xf)) {
 			e8080.F |= FLAG_ACARRY;
 		}
 	}
-	
+
 	if (fMask & FLAG_PARITY)
-	{ 
-		if (!(reg & 0x1)) {
+	{
+		uint8_t rr = reg&0xff;
+		int pf = 0;
+		while (rr)
+		{
+			pf ^= (rr&1);
+			rr >>= 1;
+		}
+		if (!(pf&1)) {
 			e8080.F |= FLAG_PARITY;
 		}
 	}
 }
 
-inline void writeReg (u8 value, int index)
+void writeReg (uint8_t value, int index)
 {
 	switch (index) {
 		case 0x00:
@@ -81,10 +84,12 @@ inline void writeReg (u8 value, int index)
 			writeByte(value, e8080.HL); break;
 		case 0x07:
 			e8080.A = value; break;
+		default:
+			assert(0);
 	}
 }
 
-inline u8 readReg (int index)
+uint8_t readReg (int index)
 {
 	switch (index) {
 		case 0x00:
@@ -103,184 +108,210 @@ inline u8 readReg (int index)
 			return readByte(e8080.HL); break;
 		case 0x07:
 			return e8080.A; break;
+		default:
+			assert(0);
 	}
 	return 0xFF;
 }
 
-inline void CMC (u8 opcode)
+void CMC (uint8_t opcode)
 {
 	e8080.F ^= FLAG_CARRY;
 }
 
-inline void STC (u8 opcode)
+void STC (uint8_t opcode)
 {
 	e8080.F |= FLAG_CARRY;
 }
 
-inline void DAA (u8 opcode)
+void DAA (uint8_t opcode)
 {
-	int top4 = (e8080.A >> 4) & 0xF;
-	int bot4 = (e8080.A & 0xF);
-	
-	if ((bot4 > 9) || (e8080.F & FLAG_ACARRY)) {
-		setFlags(e8080.A + 6, FLAG_ZERO | FLAG_SIGN | FLAG_PARITY | FLAG_CARRY | FLAG_ACARRY);
+	if (((e8080.A&0xf) > 9) || (e8080.F & FLAG_ACARRY)) {
+		if ((e8080.A&0xF) + 6 > 15)
+			e8080.F |= FLAG_ACARRY;
+		else
+			e8080.F &= ~FLAG_ACARRY;
+		setFlags(e8080.A + 6, FLAG_CARRY);
 		e8080.A += 6;
-		top4 = (e8080.A >> 4) & 0xF;
-		bot4 = (e8080.A & 0xF);
 	}
-	
-	if ((top4 > 9) || (e8080.F & FLAG_CARRY)) {
-		top4 += 6;
-		e8080.A = (top4 << 4) | bot4;
-	}
-}
-		
 
-inline void INR (u8 opcode)
+	if (((e8080.A>>4) > 9) || (e8080.F & FLAG_CARRY)) {
+		if ((e8080.A + (6 << 4)) & 0x100)
+			e8080.F |= FLAG_CARRY;
+		e8080.A += (6 << 4);
+	}
+
+	setFlags(e8080.A, FLAG_ZERO | FLAG_SIGN | FLAG_PARITY);
+}
+
+void INR (uint8_t opcode)
 {
 	int dst = (opcode >> 3) & 0x7;
-	u8 tmp = readReg(dst);
-	tmp++;
-	setFlags(tmp, FLAG_SIGN | FLAG_ZERO | FLAG_ACARRY | FLAG_PARITY);
+	uint16_t tmp = readReg(dst) + 1;
+	setFlags(tmp, FLAG_SIGN | FLAG_ZERO | FLAG_PARITY);
+	if ((readReg(dst) & 0xf) > (tmp & 0xf)) {
+		e8080.F |= FLAG_ACARRY;
+	}
+	else {
+		e8080.F &= ~FLAG_ACARRY;
+	}
 	writeReg(tmp, dst);
 }
 
-inline void DCR (u8 opcode)
+void DCR (uint8_t opcode)
 {
 	int dst = (opcode >> 3) & 0x7;
-	u8 tmp = readReg(dst);
-	tmp--;
-	setFlags(tmp, FLAG_SIGN | FLAG_ZERO | FLAG_ACARRY | FLAG_PARITY);
+	uint16_t tmp = readReg(dst) - 1;
+	setFlags(tmp, FLAG_SIGN | FLAG_ZERO | FLAG_PARITY);
+	if ((readReg(dst) & 0xf) > (tmp & 0xf)) {
+		e8080.F |= FLAG_ACARRY;
+	}
+	else {
+		e8080.F &= ~FLAG_ACARRY;
+	}
 	writeReg(tmp, dst);
 }
 
-inline void CMA (u8 opcode)
+void CMA (uint8_t opcode)
 {
-	e8080.A = ~(e8080.A);
+	e8080.A = 0xff ^ e8080.A;
 }
 
-inline void NOP (u8 opcode)
+void NOP (uint8_t opcode)
 {
 }
 
-inline void MOV (u8 opcode)
+void MOV (uint8_t opcode)
 {
 	int dst = (opcode >> 3) & 0x7;
 	int src = (opcode & 0x7);
-	u8 srcVal = readReg(src);
+	uint8_t srcVal = readReg(src);
 	writeReg(srcVal, dst);
 }
 
-inline void STAX (u8 opcode)
+void STAX (uint8_t opcode)
 {
 	int src = (opcode >> 4) & 1;
-	u16 addr = (!src) ? e8080.BC : e8080.DE;
+	uint16_t addr = (!src) ? e8080.BC : e8080.DE;
 	writeByte(e8080.A, addr);
 }
 
-inline void LDAX (u8 opcode)
+void LDAX (uint8_t opcode)
 {
 	int src = (opcode >> 4) & 1;
-	u16 addr = (!src) ? e8080.BC : e8080.DE;
+	uint16_t addr = (!src) ? e8080.BC : e8080.DE;
 	e8080.A = readByte(addr);
 }
 
-inline void ADD (u8 opcode)
+void ADD (uint8_t opcode)
 {
 	int src = (opcode & 0x7);
-	u8 srcVal = readReg(src);
+	uint8_t srcVal = readReg(src);
 	setFlags(e8080.A + srcVal, FLAG_SIGN | FLAG_ZERO | FLAG_ACARRY | FLAG_PARITY | FLAG_CARRY);
 	e8080.A += srcVal;
 }
 
-inline void ADC (u8 opcode)
+void ADC (uint8_t opcode)
 {
 	int src = (opcode & 0x7);
-	u8 srcVal = readReg(src);
-	setFlags(e8080.A + srcVal + (e8080.F & FLAG_CARRY), FLAG_SIGN | FLAG_ZERO | FLAG_ACARRY | FLAG_PARITY | FLAG_CARRY);
-	e8080.A += srcVal + (e8080.F & FLAG_CARRY);
+	uint8_t srcVal = readReg(src);
+	uint16_t tmp = e8080.A + srcVal + !!(e8080.F & FLAG_CARRY);
+	setFlags(tmp, FLAG_SIGN | FLAG_ZERO | FLAG_ACARRY | FLAG_PARITY | FLAG_CARRY);
+	e8080.A = tmp&0xff;
 }
-	
-inline void SUB (u8 opcode)
+
+void SUB (uint8_t opcode)
 {
 	int src = (opcode & 0x7);
-	u8 srcVal = readReg(src);
+	uint8_t srcVal = readReg(src);
 	setFlags(e8080.A - srcVal, FLAG_SIGN | FLAG_ZERO | FLAG_ACARRY | FLAG_PARITY | FLAG_CARRY);
 	e8080.A -= srcVal;
 }
 
-inline void SBB (u8 opcode)
+void SBB (uint8_t opcode)
 {
 	int src = (opcode & 0x7);
-	u8 srcVal = readReg(src);
-	setFlags(e8080.A - (srcVal + (e8080.F & FLAG_CARRY)), FLAG_SIGN | FLAG_ZERO | FLAG_ACARRY | FLAG_PARITY | FLAG_CARRY);
-	e8080.A -= (srcVal + (e8080.F & FLAG_CARRY));
+	uint8_t srcVal = readReg(src);
+	uint16_t tmp = e8080.A - (srcVal + !!(e8080.F & FLAG_CARRY));
+	setFlags(tmp, FLAG_SIGN | FLAG_ZERO | FLAG_ACARRY | FLAG_PARITY | FLAG_CARRY);
+	e8080.A = tmp&0xff;
 }
 
-inline void ANA (u8 opcode)
+void ANA (uint8_t opcode)
 {
 	int src = (opcode & 0x7);
-	u8 srcVal = readReg(src);
-	setFlags(e8080.A & srcVal, FLAG_SIGN | FLAG_ZERO | FLAG_ACARRY | FLAG_PARITY | FLAG_CARRY);
+	uint8_t srcVal = readReg(src);
+	setFlags(e8080.A & srcVal, FLAG_SIGN | FLAG_ZERO | FLAG_PARITY);
+	e8080.F &= ~FLAG_CARRY;
+	e8080.F &= ~FLAG_ACARRY;
+	if ((e8080.A | srcVal) & 0x08) {
+		e8080.F |= FLAG_ACARRY;
+	}
 	e8080.A &= srcVal;
 }
 
-inline void XRA (u8 opcode)
+void XRA (uint8_t opcode)
 {
 	int src = (opcode & 0x7);
-	u8 srcVal = readReg(src);
-	setFlags(e8080.A ^ srcVal, FLAG_SIGN | FLAG_ZERO | FLAG_ACARRY | FLAG_PARITY | FLAG_CARRY);
+	uint8_t srcVal = readReg(src);
+	setFlags(e8080.A ^ srcVal, FLAG_SIGN | FLAG_ZERO | FLAG_PARITY);
+	e8080.F &= ~FLAG_CARRY;
 	e8080.A ^= srcVal;
+	e8080.F &= ~FLAG_ACARRY;
 }
 
-inline void ORA (u8 opcode)
+void ORA (uint8_t opcode)
 {
 	int src = (opcode & 0x7);
-	u8 srcVal = readReg(src);
-	setFlags(e8080.A | srcVal, FLAG_SIGN | FLAG_ZERO | FLAG_ACARRY | FLAG_PARITY | FLAG_CARRY);
+	uint8_t srcVal = readReg(src);
+	setFlags(e8080.A | srcVal, FLAG_SIGN | FLAG_ZERO | FLAG_PARITY);
+	e8080.F &= ~FLAG_CARRY;
 	e8080.A |= srcVal;
+	e8080.F &= ~FLAG_ACARRY;
 }
 
-inline void CMP (u8 opcode)
+void CMP (uint8_t opcode)
 {
 	int src = (opcode & 0x7);
-	u8 srcVal = readReg(src);
+	uint8_t srcVal = readReg(src);
 	setFlags(e8080.A - srcVal, FLAG_SIGN | FLAG_ZERO | FLAG_ACARRY | FLAG_PARITY | FLAG_CARRY);
 }
 
-inline void RLC (u8 opcode)
+void RLC (uint8_t opcode)
 {
-	e8080.F = ~(FLAG_CARRY);
+	e8080.F &= ~(FLAG_CARRY);
 	if (e8080.A & (1 << 7)) {
 		e8080.F |= FLAG_CARRY;
 	}
-	e8080.A = (e8080.A << 1) | (e8080.F & FLAG_CARRY);
+	e8080.A = (e8080.A << 1) | !!(e8080.F & FLAG_CARRY);
 }
 
-inline void RRC (u8 opcode)
+void RRC (uint8_t opcode)
 {
-	e8080.F = ~(FLAG_CARRY);
+	e8080.F &= ~(FLAG_CARRY);
 	if (e8080.A & 1) {
 		e8080.F |= FLAG_CARRY;
 	}
-	e8080.A = (e8080.A >> 1) | ((e8080.F & FLAG_CARRY) << 7);
+	e8080.A = (e8080.A >> 1) | (!!(e8080.F & FLAG_CARRY) << 7);
 }
 
-inline void RAL (u8 opcode)
+void RAL (uint8_t opcode)
 {
-	u8 c = (e8080.A & (1 << 7));
-	e8080.A = (e8080.A << 1) | (e8080.F & FLAG_CARRY);
-	e8080.F = c;
+	uint8_t c = (e8080.A & (1 << 7));
+	e8080.A = (e8080.A << 1) | !!(e8080.F & FLAG_CARRY);
+	if (c) e8080.F |= FLAG_CARRY;
+	else   e8080.F &= ~FLAG_CARRY;
 }
 
-inline void RAR (u8 opcode)
+void RAR (uint8_t opcode)
 {
-	u8 c = (e8080.A & 1);
-	e8080.A = (e8080.A >> 1) | ((e8080.F & FLAG_CARRY) << 7);
-	e8080.F = c;
+	uint8_t c = (e8080.A & 1);
+	e8080.A = (e8080.A >> 1) | (!!(e8080.F & FLAG_CARRY) << 7);
+	if (c) e8080.F |= FLAG_CARRY;
+	else   e8080.F &= ~FLAG_CARRY;
 }
 
-inline void PUSH (u8 opcode)
+void PUSH (uint8_t opcode)
 {
 	int src = (opcode >> 4) & 3;
 	switch (src) {
@@ -291,16 +322,16 @@ inline void PUSH (u8 opcode)
 		case 0x02:
 			stackPush(e8080.HL); break;
 		case 0x03:
-			stackPush(e8080.AF); break;	
+			stackPush(e8080.AF); break;
 		default:
-			while (1);
+			assert(0);
 	}
 }
 
-inline void POP (u8 opcode)
+void POP (uint8_t opcode)
 {
 	int src = (opcode >> 4) & 3;
-	u16 val = stackPop();
+	uint16_t val = stackPop();
 	switch (src) {
 		case 0x00:
 			e8080.BC = val;
@@ -312,17 +343,17 @@ inline void POP (u8 opcode)
 			e8080.HL = val;
 			break;
 		case 0x03:
-			e8080.AF = val;
+			e8080.AF = (val & 0xFFD7) | 0x02;
 			break;
 		default:
-			while (1);			
+			assert(0);
 	}
 }
 
-inline void DAD (u8 opcode)
+void DAD (uint8_t opcode)
 {
 	int src = (opcode >> 4) & 3;
-	u16 rVal = 0;
+	uint16_t rVal = 0;
 	switch (src) {
 		case 0x00:
 			rVal = e8080.BC; break;
@@ -331,13 +362,17 @@ inline void DAD (u8 opcode)
 		case 0x02:
 			rVal = e8080.HL; break;
 		case 0x03:
-			rVal = e8080.AF; break;			
+			rVal = e8080.SP; break;
+		default:
+			assert(0);
 	}
-	setFlags(e8080.HL + rVal, FLAG_CARRY);
+	e8080.F &= ~FLAG_CARRY;
+	if ((e8080.HL + rVal) & 0x10000)
+		e8080.F |= FLAG_CARRY;
 	e8080.HL += rVal;
 }
 
-inline void INX (u8 opcode)
+void INX (uint8_t opcode)
 {
 	int src = (opcode >> 4) & 3;
 	switch (src) {
@@ -351,51 +386,58 @@ inline void INX (u8 opcode)
 			e8080.HL++;
 			break;
 		case 0x03:
-			e8080.SP++; 
+			e8080.SP++;
 			break;
 		default:
-			while (1);
+			assert(0);
 	}
 }
 
-inline void DCX (u8 opcode)
+void DCX (uint8_t opcode)
 {
 	int src = (opcode >> 4) & 3;
 	switch (src) {
 		case 0x00:
 			e8080.BC--;
 			break;
-		case 0x01: 
+		case 0x01:
 			e8080.DE--;
 			break;
 		case 0x02:
 			e8080.HL--;
 			break;
 		case 0x03:
-			e8080.SP--; 
+			e8080.SP--;
 			break;
 		default:
-			while (1);			
+			assert(0);
 	}
 }
 
-inline void XCHG (u8 opcode)
+void XCHG (uint8_t opcode)
 {
-	FASTSWAP(e8080.DE, e8080.HL);
+	uint16_t tmp = e8080.DE;
+	e8080.DE = e8080.HL;
+	e8080.HL = tmp;
 }
 
-inline void XTHL (u8 opcode)
+void XTHL (uint8_t opcode)
 {
-	e8080.H = readByte(e8080.SP);
-	e8080.L = readByte(e8080.SP + 1);
+	uint8_t old_h = e8080.H;
+	uint8_t old_l = e8080.L;
+
+	e8080.L = readByte(e8080.SP + 0);
+	writeByte(old_l, e8080.SP + 0);
+	e8080.H = readByte(e8080.SP + 1);
+	writeByte(old_h, e8080.SP + 1);
 }
 
-inline void SPHL (u8 opcode)
+void SPHL (uint8_t opcode)
 {
 	e8080.SP = e8080.HL;
 }
 
-inline void LXI (u8 opcode)
+void LXI (uint8_t opcode)
 {
 	int dst = (opcode >> 4) & 3;
 	switch (dst) {
@@ -409,112 +451,148 @@ inline void LXI (u8 opcode)
 			e8080.HL = fetch16();
 			break;
 		case 0x03:
-			e8080.SP = fetch16(); 
-			break;			
+			e8080.SP = fetch16();
+			break;
 		default:
-			while (1);			
+			assert(0);
 	}
 }
 
-inline void MVI (u8 opcode)
+void MVI (uint8_t opcode)
 {
 	int dst = (opcode >> 3) & 0x7;
 	writeReg(fetch8(), dst);
 }
 
-inline void ADI (u8 opcode)
+void ADI (uint8_t opcode)
 {
-	u8 imm = fetch8();
+	uint8_t imm = fetch8();
 	setFlags(e8080.A + imm, FLAG_SIGN | FLAG_ZERO | FLAG_ACARRY | FLAG_PARITY | FLAG_CARRY);
 	e8080.A += imm;
 }
 
-inline void ACI (u8 opcode)
+void ACI (uint8_t opcode)
 {
-	u8 imm = fetch8();
-	setFlags(e8080.A + imm + (e8080.F & FLAG_CARRY), FLAG_SIGN | FLAG_ZERO | FLAG_ACARRY | FLAG_PARITY | FLAG_CARRY);
-	e8080.A += (imm + (e8080.F & FLAG_CARRY));
+	uint8_t imm = fetch8();
+	uint16_t tmp = e8080.A + imm + !!(e8080.F & FLAG_CARRY);
+	setFlags(tmp, FLAG_SIGN | FLAG_ZERO | FLAG_ACARRY | FLAG_PARITY | FLAG_CARRY);
+	e8080.A = tmp;
 }
 
-inline void SUI (u8 opcode)
+void SUI (uint8_t opcode)
 {
-	u8 imm = fetch8();
-	setFlags(e8080.A - imm, FLAG_SIGN | FLAG_ZERO | FLAG_ACARRY | FLAG_PARITY | FLAG_CARRY);
+	uint8_t imm = fetch8();
+	setFlags(e8080.A - imm, FLAG_SIGN | FLAG_ZERO | FLAG_PARITY);
+	if ((e8080.A - imm) > 0xFF)
+		e8080.F &= ~FLAG_CARRY;
+	else
+		e8080.F |= FLAG_CARRY;
+	if (((e8080.A - imm) & 0xF) > (e8080.A&0xF))
+		e8080.F &= ~FLAG_ACARRY;
+	else
+		e8080.F |= FLAG_ACARRY;
 	e8080.A -= imm;
 }
 
-inline void SBI (u8 opcode)
+void SBI (uint8_t opcode)
 {
-	u8 imm = fetch8();
-	setFlags(e8080.A - (imm + (e8080.F & FLAG_CARRY)), FLAG_SIGN | FLAG_ZERO | FLAG_ACARRY | FLAG_PARITY | FLAG_CARRY);
-	e8080.A -= (imm + (e8080.F & FLAG_CARRY));
+	uint8_t imm = fetch8();
+	uint16_t tmp = e8080.A - imm - !!(e8080.F & FLAG_CARRY);
+	setFlags(tmp, FLAG_SIGN | FLAG_ZERO | FLAG_PARITY);
+	if ((e8080.A - imm) > 0xFF)
+		e8080.F &= ~FLAG_CARRY;
+	else
+		e8080.F |= FLAG_CARRY;
+	if (((e8080.A - imm) & 0xF) > (e8080.A&0xF))
+		e8080.F &= ~FLAG_ACARRY;
+	else
+		e8080.F |= FLAG_ACARRY;
+	e8080.A = tmp;
 }
 
-inline void ANI (u8 opcode)
+void ANI (uint8_t opcode)
 {
-	u8 imm = fetch8();
-	setFlags(e8080.A & imm, FLAG_SIGN | FLAG_ZERO | FLAG_PARITY | FLAG_CARRY);
+	uint8_t imm = fetch8();
+	setFlags(e8080.A & imm, FLAG_SIGN | FLAG_ZERO | FLAG_PARITY);
+	e8080.F &= ~FLAG_CARRY;
+	e8080.F &= ~FLAG_ACARRY;
+	if ((e8080.A | imm) & 0x08) {
+		e8080.F |= FLAG_ACARRY;
+	}
 	e8080.A &= imm;
 }
 
-inline void XRI (u8 opcode)
+void XRI (uint8_t opcode)
 {
-	u8 imm = fetch8();
-	setFlags(e8080.A ^ imm, FLAG_SIGN | FLAG_ZERO | FLAG_PARITY | FLAG_CARRY);
+	uint8_t imm = fetch8();
+	setFlags(e8080.A ^ imm, FLAG_SIGN | FLAG_ZERO | FLAG_PARITY);
+	e8080.F &= ~FLAG_CARRY;
+	e8080.F &= ~FLAG_ACARRY;
 	e8080.A ^= imm;
 }
 
-inline void ORI (u8 opcode)
+void ORI (uint8_t opcode)
 {
-	u8 imm = fetch8();
-	setFlags(e8080.A | imm, FLAG_SIGN | FLAG_ZERO | FLAG_PARITY | FLAG_CARRY);
+	uint8_t imm = fetch8();
+	setFlags(e8080.A | imm, FLAG_SIGN | FLAG_ZERO | FLAG_PARITY);
+	e8080.F &= ~FLAG_CARRY;
+	e8080.F &= ~FLAG_ACARRY;
 	e8080.A |= imm;
 }
 
-inline void CPI (u8 opcode)
+void CPI (uint8_t opcode)
 {
-	u8 imm = fetch8();
-	setFlags(e8080.A - imm, FLAG_SIGN | FLAG_ZERO | FLAG_ACARRY | FLAG_PARITY | FLAG_CARRY);
-	e8080.A -= imm;
+	uint8_t imm = fetch8();
+	// setFlags(e8080.A - imm, FLAG_SIGN | FLAG_ZERO | FLAG_ACARRY | FLAG_PARITY | FLAG_CARRY);
+	setFlags(e8080.A - imm, FLAG_SIGN | FLAG_ZERO | FLAG_PARITY);
+	setFlags(e8080.A + ~imm + 1, FLAG_CARRY | FLAG_ACARRY);
+	// if ((e8080.A - imm) > 0xFF)
+	// 	e8080.F &= ~FLAG_CARRY;
+	// else
+	// 	e8080.F |= FLAG_CARRY;
+	// if (((e8080.A - imm) & 0xF) > (e8080.A&0xF))
+	// 	e8080.F &= ~FLAG_ACARRY;
+	// else
+	// 	e8080.F |= FLAG_ACARRY;
 }
 
-inline void STA (u8 opcode)
+void STA (uint8_t opcode)
 {
-	u16 addr = fetch16();
+	uint16_t addr = fetch16();
 	writeByte(e8080.A, addr);
 }
 
-inline void LDA (u8 opcode)
+void LDA (uint8_t opcode)
 {
-	u16 addr = fetch16();
+	uint16_t addr = fetch16();
 	e8080.A = readByte(addr);
 }
 
-inline void SHLD (u8 opcode)
+void SHLD (uint8_t opcode)
 {
-	u16 addr = fetch16();
-	writeByte(e8080.H, addr);
-	writeByte(e8080.L, addr + 1);
+	uint16_t addr = fetch16();
+	writeByte(e8080.H, addr + 1);
+	writeByte(e8080.L, addr + 0);
 }
 
-inline void LHLD (u8 opcode)
+void LHLD (uint8_t opcode)
 {
-	u16 addr = fetch16();
-	e8080.H = readByte(addr);
-	e8080.L = readByte(addr + 1);
+	uint16_t addr = fetch16();
+	e8080.H = readByte(addr + 1);
+	e8080.L = readByte(addr + 0);
 }
 
-inline void PCHL (u8 opcode)
+void PCHL (uint8_t opcode)
 {
 	e8080.PC = e8080.HL;
 }
 
-inline void JMP (u8 opcode)
+void JMP (uint8_t opcode)
 {
 	e8080.PC = fetch16();
 }
 
-inline void JC (u8 opcode)
+void JC (uint8_t opcode)
 {
 	if (e8080.F & FLAG_CARRY) {
 		JMP(opcode);
@@ -523,7 +601,7 @@ inline void JC (u8 opcode)
 	}
 }
 
-inline void JNC (u8 opcode)
+void JNC (uint8_t opcode)
 {
 	if (!(e8080.F & FLAG_CARRY)) {
 		JMP(opcode);
@@ -532,7 +610,7 @@ inline void JNC (u8 opcode)
 	}
 }
 
-inline void JZ (u8 opcode)
+void JZ (uint8_t opcode)
 {
 	if (e8080.F & FLAG_ZERO) {
 		JMP(opcode);
@@ -541,7 +619,7 @@ inline void JZ (u8 opcode)
 	}
 }
 
-inline void JNZ (u8 opcode)
+void JNZ (uint8_t opcode)
 {
 	if (!(e8080.F & FLAG_ZERO)) {
 		JMP(opcode);
@@ -550,7 +628,7 @@ inline void JNZ (u8 opcode)
 	}
 }
 
-inline void JM (u8 opcode)
+void JM (uint8_t opcode)
 {
 	if (e8080.F & FLAG_SIGN) {
 		JMP(opcode);
@@ -559,7 +637,7 @@ inline void JM (u8 opcode)
 	}
 }
 
-inline void JP (u8 opcode)
+void JP (uint8_t opcode)
 {
 	if (!(e8080.F & FLAG_SIGN)) {
 		JMP(opcode);
@@ -568,7 +646,16 @@ inline void JP (u8 opcode)
 	}
 }
 
-inline void JPE (u8 opcode)
+void JPE (uint8_t opcode)
+{
+	if (e8080.F & FLAG_PARITY) {
+		JMP(opcode);
+	} else {
+		e8080.PC += 2;
+	}
+}
+
+void JPO (uint8_t opcode)
 {
 	if (!(e8080.F & FLAG_PARITY)) {
 		JMP(opcode);
@@ -577,25 +664,39 @@ inline void JPE (u8 opcode)
 	}
 }
 
-inline void JPO (u8 opcode)
+void CALL (uint8_t opcode)
 {
-	if (e8080.F & FLAG_PARITY) {		
-		JMP(opcode);
-	} else {
-		e8080.PC += 2;
+	uint16_t addr = fetch16();
+	if (addr == 0x5)
+	{
+		if (e8080.C == 0x09) {
+			int i = 0;
+			while (1) {
+				uint8_t ch = readByte(e8080.DE + i);
+				if (ch == '$') {
+					break;
+				}
+				fputc(ch, stderr);
+				i++;
+			}
+		}
+		else if (e8080.C == 0x02) {
+			uint8_t ch = e8080.E;
+			fputc(ch, stderr);
+		}
+		else {
+			// Unhandled FDOS instruction
+			fprintf(stderr, "unhandled FDOS fn=%d\n", e8080.C);
+			assert(0);
+		}
+	}
+	else {
+		stackPush(e8080.PC);
+		e8080.PC = addr;
 	}
 }
 
-inline void CALL (u8 opcode)
-{
-	u16 addr = fetch16();
-	stackPush(e8080.PC);
-	e8080.PC = addr;
-	/*if (e8080.PC == 0x100)
-		die("NOW");*/
-}
-
-inline void CC (u8 opcode)
+void CC (uint8_t opcode)
 {
 	if (e8080.F & FLAG_CARRY) {
 		CALL(opcode);
@@ -604,7 +705,7 @@ inline void CC (u8 opcode)
 	}
 }
 
-inline void CNC (u8 opcode)
+void CNC (uint8_t opcode)
 {
 	if (!(e8080.F & FLAG_CARRY)) {
 		CALL(opcode);
@@ -613,7 +714,7 @@ inline void CNC (u8 opcode)
 	}
 }
 
-inline void CZ (u8 opcode)
+void CZ (uint8_t opcode)
 {
 	if (e8080.F & FLAG_ZERO) {
 		CALL(opcode);
@@ -622,7 +723,7 @@ inline void CZ (u8 opcode)
 	}
 }
 
-inline void CNZ (u8 opcode)
+void CNZ (uint8_t opcode)
 {
 	if (!(e8080.F & FLAG_ZERO)) {
 		CALL(opcode);
@@ -631,7 +732,7 @@ inline void CNZ (u8 opcode)
 	}
 }
 
-inline void CM (u8 opcode)
+void CM (uint8_t opcode)
 {
 	if (e8080.F & FLAG_SIGN) {
 		CALL(opcode);
@@ -640,7 +741,7 @@ inline void CM (u8 opcode)
 	}
 }
 
-inline void CP (u8 opcode)
+void CP (uint8_t opcode)
 {
 	if (!(e8080.F & FLAG_SIGN)) {
 		CALL(opcode);
@@ -649,16 +750,7 @@ inline void CP (u8 opcode)
 	}
 }
 
-inline void CPE (u8 opcode)
-{
-	if (!(e8080.F & FLAG_PARITY)) {
-		CALL(opcode);
-	} else {
-		e8080.PC += 2;
-	}
-}
-
-inline void CPO (u8 opcode)
+void CPE (uint8_t opcode)
 {
 	if (e8080.F & FLAG_PARITY) {
 		CALL(opcode);
@@ -667,133 +759,142 @@ inline void CPO (u8 opcode)
 	}
 }
 
-inline void RET (u8 opcode)
+void CPO (uint8_t opcode)
+{
+	if (!(e8080.F & FLAG_PARITY)) {
+		CALL(opcode);
+	} else {
+		e8080.PC += 2;
+	}
+}
+
+void RET (uint8_t opcode)
 {
 	e8080.PC = stackPop();
 }
 
-inline void RC (u8 opcode)
+void RC (uint8_t opcode)
 {
 	if (e8080.F & FLAG_CARRY) {
 		RET(opcode);
 	}
 }
 
-inline void RNC (u8 opcode)
+void RNC (uint8_t opcode)
 {
 	if (!(e8080.F & FLAG_CARRY)) {
 		RET(opcode);
 	}
 }
 
-inline void RZ (u8 opcode)
+void RZ (uint8_t opcode)
 {
 	if (e8080.F & FLAG_ZERO) {
 		RET(opcode);
 	}
 }
 
-inline void RNZ (u8 opcode)
+void RNZ (uint8_t opcode)
 {
 	if (!(e8080.F & FLAG_ZERO)) {
 		RET(opcode);
 	}
 }
 
-inline void RM (u8 opcode)
+void RM (uint8_t opcode)
 {
 	if (e8080.F & FLAG_SIGN) {
 		RET(opcode);
 	}
 }
 
-inline void RP (u8 opcode)
+void RP (uint8_t opcode)
 {
 	if (!(e8080.F & FLAG_SIGN)) {
 		RET(opcode);
 	}
 }
 
-inline void RPE (u8 opcode)
-{
-	if (!(e8080.F & FLAG_PARITY)) {
-		RET(opcode);
-	}
-}
-
-inline void RPO (u8 opcode)
+void RPE (uint8_t opcode)
 {
 	if (e8080.F & FLAG_PARITY) {
 		RET(opcode);
 	}
 }
 
-inline void RST (u8 opcode)
+void RPO (uint8_t opcode)
+{
+	if (!(e8080.F & FLAG_PARITY)) {
+		RET(opcode);
+	}
+}
+
+void RST (uint8_t opcode)
 {
 	stackPush(e8080.PC);
 	e8080.PC = ((opcode >> 3) & 0x7) << 3;
 }
 
-inline void EI (u8 opcode)
+void EI (uint8_t opcode)
 {
 	e8080.IE = 1;
 }
 
-inline void DI (u8 opcode)
+void DI (uint8_t opcode)
 {
 	e8080.IE = 0;
 }
 
-inline void IN (u8 opcode)
+void IN (uint8_t opcode)
 {
 	e8080.A = e8080.portIn(fetch8());
 }
 
-inline void OUT (u8 opcode)
+void OUT (uint8_t opcode)
 {
 	e8080.portOut(fetch8(), e8080.A);
 }
 
-inline void HLT (u8 opcode)
+void HLT (uint8_t opcode)
 {
 	e8080.halt = 1;
 }
 
-static struct 
+static struct
 {
-	void (* execute) (u8 opcode);
+	void (* execute) (uint8_t opcode);
 	int cycles;
 } opTbl [0x100] = {
-	{  NOP, 4},
-	{  LXI, 10},
-	{  STAX, 7},
-	{  INX, 5},
-	{  INR, 5},
-	{  DCR, 5},
-	{  MVI, 7},
-	{  RLC, 4},
-	{  NOP, 4},
-	{  DAD, 10},
-	{  LDAX, 7}, 
-	{  DCX, 5},
-	{  INR, 5},
-	{  DCR, 5},
-	{  MVI, 7},
-	{  RRC, 4},
-	{  NOP, 4}, // 0x10
-	{  LXI, 10},
-	{  STAX, 7},
-	{  INX, 5},
-	{  INR, 5},
-	{  DCR, 5},
-	{  MVI, 7},
-	{  RAL, 4},
-	{  NOP, 4},
-	{  DAD, 10},
-	{  LDAX, 7},
-	{  DCX, 5},
-	{  INR, 5},
-	{  DCR, 5},
+	{ NOP, 4},
+	{ LXI, 10},
+	{ STAX, 7},
+	{ INX, 5},
+	{ INR, 5},
+	{ DCR, 5},
+	{ MVI, 7},
+	{ RLC, 4},
+	{ NOP, 4},
+	{ DAD, 10},
+	{ LDAX, 7},
+	{ DCX, 5},
+	{ INR, 5},
+	{ DCR, 5},
+	{ MVI, 7},
+	{ RRC, 4},
+	{ NOP, 4}, // 0x10
+	{ LXI, 10},
+	{ STAX, 7},
+	{ INX, 5},
+	{ INR, 5},
+	{ DCR, 5},
+	{ MVI, 7},
+	{ RAL, 4},
+	{ NOP, 4},
+	{ DAD, 10},
+	{ LDAX, 7},
+	{ DCX, 5},
+	{ INR, 5},
+	{ DCR, 5},
 	{ MVI, 7},
 	{ RAR, 4},
 	{ NOP, 4},// 0x20
@@ -875,7 +976,7 @@ static struct
 	{ MOV, 5},
 	{ MOV, 5},
 	{ MOV, 7},
-	{ MOV, 5},	
+	{ MOV, 5},
 	{ MOV, 5}, // 0X70
 	{ MOV, 5},
 	{ MOV, 5},

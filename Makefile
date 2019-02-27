@@ -1,4 +1,10 @@
-OBJS = src/8080Core.c src/SpaceInvaders.c
-#
-all:
-	gcc $(OBJS) -g -O3 -Wall `sdl-config --cflags --libs` -o spaceinvaders
+OBJS = src/8080Core.c src/8080Memory.c
+
+all: testr sinv
+
+testr:
+	gcc $(OBJS) src/testrom.c -DDEBUG -O3 -g -Wall -o testrom
+sinv:
+	gcc $(OBJS) src/SpaceInvaders.c -DDEBUG -g -Wall `sdl-config --cflags --libs` -o spaceinvaders
+
+.PHONY: all testr sinv

@@ -1,9 +1,12 @@
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
+#include <assert.h>
+
 #include "8080Core.h"
 #include "8080Opcodes.h"
 
-void causeInt (int address)
+void causeInt (uint16_t address)
 {
 	if (e8080.IE) {
 		stackPush(e8080.PC);
@@ -43,9 +46,13 @@ int emulate8080 (int cycles)
 			break;
 		}
 		
-		u8 opcode = fetch8();
+		uint8_t opcode = fetch8();
 #ifdef DEBUG		
-		printf("[%04x] %s\n", e8080.PC, lut_mnemonic[opcode]);	
+		if (e8080.PC - 1 == 0x1A5B)
+			dumpRegisters();
+		// if (e8080.PC >= 0x100 && e8080.PC < 0x6B0)
+		// if (e8080.PC >= 0x1000)
+		printf("[%04x] %02x %s\n", e8080.PC - 1, opcode, lut_mnemonic[opcode]);	
 #endif
 		
 		opTbl[opcode].execute (opcode);
@@ -55,59 +62,17 @@ int emulate8080 (int cycles)
 	return cyclesDone;
 }
 
-void reset8080 ()
+void reset8080 (uint16_t pc)
 {
-	int c;
 	memset(&e8080, 0, sizeof e8080);
 	e8080.SP = 0xF000;
-	e8080.ram = (ramBank *)&wram8080;
-	for (c = 0; c < 4; c++) {
-		if (e8080.ram[c].flag == FLAG_UNUSED)
-			continue;
-		if (e8080.ram[c].flag == FLAG_MIRROR)
-			continue;					
-		if (!e8080.ram[c].ptr)
-			e8080.ram[c].ptr = malloc(e8080.ram[c].size);
-		if (!e8080.ram[c].flag != FLAG_ROM)
-			memset(e8080.ram[c].ptr, 0, e8080.ram[c].size);
-	}
+	e8080.F = 0x02;
+	e8080.PC = pc;
+	e8080.ram = NULL;
 }
 
-int initalize8080 ()
+void dumpRegisters ()
 {
-	FILE * romBank;
-	char *bankName[] = {"invaders.h", "invaders.g", "invaders.f", "invaders.e"};
-	int c;
-	
-	printf("Resetting the 8080...\n");
-	
-	reset8080();
-	
-	u8 *bankPtr = NULL;
-	
-	for (c = 0; c < 4; c++) {
-		if (e8080.ram[c].flag == FLAG_ROM) {
-			printf("ROM @ %#x (%#x) %p\n", e8080.ram[c].start, e8080.ram[c].size, e8080.ram[c].ptr);
-			bankPtr = e8080.ram[c].ptr;
-			break;
-		}
-	}
-			
-	if (!bankPtr)
-		die("No rom bank defined");
-			
-	for (c = 0; c < 4; c++) {
-		romBank = fopen(bankName[c], "rb");
-		if (!romBank) {
-			return 0;
-		}
-		if (fread(&bankPtr[0x0800 * c], 1, 0x0800, romBank) != 0x0800) {
-			return 0;
-		}
-		fclose(romBank);
-	}
-	
-	printf("Loaded the 4 rom banks...\n");
-	
-	return 1;
+	printf("A : %02X F : %02X\nB : %02x C : %02x\nD : %02x E : %02x\nH : %02x L : %02x\nPC : %04x SP : %04x\n",
+		e8080.A, e8080.F, e8080.B, e8080.C, e8080.D, e8080.E, e8080.H, e8080.L, e8080.PC, e8080.SP);
 }
