@@ -1,16 +1,19 @@
 #include <stdio.h>
 #include "8080Core.h"
-#include <SDL/SDL.h>
+#include <SDL2/SDL.h>
 
-SDL_Surface * screen;
-SDL_Event ev;
+static SDL_Window *win;
+static SDL_Renderer *renderer;
+static SDL_Texture *screentex;
+static SDL_Event ev;
+static uint8_t screen_buf[256*224*4];
 
-uint8_t dip0 = 0x0f;
-uint8_t dip1 = 0x08;
-uint8_t dip2 = 0x01;
+static uint8_t dip0 = 0x0f;
+static uint8_t dip1 = 0x08;
+static uint8_t dip2 = 0x01;
 
-uint16_t shiftReg = 0x0000;
-int shiftOff = 0x0000;
+static uint16_t shiftReg = 0x0000;
+static int shiftOff = 0;
 
 void die(char *err)
 {
@@ -32,8 +35,7 @@ uint8_t spaceInvaders_portIn (int port)
 		case 3:
 			return shiftReg >> (8 - shiftOff);
 		default:
-			printf("Read %d\n", port);
-			die("Unknown port access");
+			printf("Port read %d\n", port);
 	}
 
 	return 0x00;
@@ -53,35 +55,39 @@ void spaceInvaders_portOut (int port, uint8_t value)
 		case 6:
 			break;
 		default:
-			printf("Write %d %d\n", port, value);
-			// die("Unknown port access");
+			printf("Port write %d %d\n", port, value);
 	}
 }
 
 void spaceInvaders_vblank ()
 {
-	int vramPtr, b;
+	uint16_t vram_base = 0x2400;
+	uint32_t *screenPtr = screen_buf;
+	int i;
 
-	SDL_LockSurface(screen);
+	while (vram_base < 0x4000) {
+		uint8_t b = readByte(vram_base);
 
-	uint8_t *screenPtr = screen->pixels;
+		*screenPtr++ = ((b >> 0)&1) ?  0xFFFFFFFF : 0xFF000000;
+		*screenPtr++ = ((b >> 1)&1) ?  0xFFFFFFFF : 0xFF000000;
+		*screenPtr++ = ((b >> 2)&1) ?  0xFFFFFFFF : 0xFF000000;
+		*screenPtr++ = ((b >> 3)&1) ?  0xFFFFFFFF : 0xFF000000;
+		*screenPtr++ = ((b >> 4)&1) ?  0xFFFFFFFF : 0xFF000000;
+		*screenPtr++ = ((b >> 5)&1) ?  0xFFFFFFFF : 0xFF000000;
+		*screenPtr++ = ((b >> 6)&1) ?  0xFFFFFFFF : 0xFF000000;
+		*screenPtr++ = ((b >> 7)&1) ?  0xFFFFFFFF : 0xFF000000;
 
-	for (vramPtr = 0; vramPtr < 0x4000 - 0x2400; vramPtr++) {
-		for (b=0;b<8;b++) {
-			*screenPtr = ((readByte(0x2400 + vramPtr) >> b)&1) ? 0xFF : 0x00;
-			screenPtr++;
-		}
+		vram_base += 1;
 	}
 
-	SDL_UnlockSurface(screen);
-
-	SDL_Flip(screen);
+	SDL_UpdateTexture(screentex, NULL, screen_buf, 256 * 4);
 }
 
 void spaceInvaders_update_input ()
 {
-	dip0 = 0x0e;
-	dip1 = 0x08;
+	dip0  = 0x0E;
+	dip1 &= 0xE0;
+
 	while (SDL_PollEvent(&ev)) {
 		switch (ev.type) {
 			case SDL_KEYUP:
@@ -122,22 +128,24 @@ int main(int argc, char *argv[])
 {
 	if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_JOYSTICK) != 0) {
 		printf("Cannot initialize SDL\n");
-		exit(0);
+		return 0;
 	}
 
 	atexit(SDL_Quit);
 
-	// SDL_EnableKeyRepeat(0, 0);
+	if (SDL_CreateWindowAndRenderer(256, 256, SDL_WINDOW_OPENGL, &win,
+					&renderer)) {
+		printf("Cannot create a new window\n");
+		return 0;
+	}
 
-	screen = SDL_SetVideoMode(256, 224, 8, SDL_DOUBLEBUF);
-
-	SDL_WM_SetCaption("OMGALIENZATEMYLEM0N", NULL);
+	screentex = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888,
+				      SDL_TEXTUREACCESS_STREAMING, 256, 224);
 
 	reset8080(0x0001);
 
 	uint8_t *buf = registerBank(0x0000, 4 * 0x0800, NULL, 1);
 	char *bankName[] = {"invaders.h", "invaders.g", "invaders.f", "invaders.e"};
-	// char *bankName[] = {"se_test_716.bin", "invaders.g", "invaders.f", "invaders.e"};
 	int i;
 
 	for (i = 0; i < 4; i++) {
@@ -154,21 +162,24 @@ int main(int argc, char *argv[])
 	buf[0] = 0xc3;
 
 	registerBank(0x2000, 0x2000, NULL, 0);
-	// registerMirror(0x4000, 0x2000, 0x0000);
-	// registerMirror(0x6000, 0x2000, 0x2000);
 
 	e8080.portIn = spaceInvaders_portIn;
 	e8080.portOut = spaceInvaders_portOut;
 
-	while (!e8080.halt)
-	{
-		emulate8080(28527);
+	SDL_Rect dest_rect = { 0, 0, 256, 224 };
+
+	while (!e8080.halt) {
+		emulate8080(17066);
 		causeInt(8);
 		spaceInvaders_vblank();
-		emulate8080(4839);
+		emulate8080(17066);
 		causeInt(16);
 		spaceInvaders_update_input();
 		SDL_Delay(15);
+
+		SDL_RenderClear(renderer);
+		SDL_RenderCopyEx(renderer, screentex, NULL, &dest_rect, 270, NULL, 0);
+		SDL_RenderPresent(renderer);
 	}
 
 	return 1;

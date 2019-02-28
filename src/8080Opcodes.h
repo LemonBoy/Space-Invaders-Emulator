@@ -127,21 +127,18 @@ void STC (uint8_t opcode)
 void DAA (uint8_t opcode)
 {
 	if (((e8080.A&0xf) > 9) || (e8080.F & FLAG_ACARRY)) {
-		if ((e8080.A&0xF) + 6 > 15)
+		e8080.F &= ~FLAG_ACARRY;
+		if (((e8080.A&0xF) + 6) > 15)
 			e8080.F |= FLAG_ACARRY;
-		else
-			e8080.F &= ~FLAG_ACARRY;
-		setFlags(e8080.A + 6, FLAG_CARRY);
+		if ((e8080.A + 6) & 0x100)
+			e8080.F |= FLAG_CARRY;
 		e8080.A += 6;
 	}
-
 	if (((e8080.A>>4) > 9) || (e8080.F & FLAG_CARRY)) {
-		if ((e8080.A + (6 << 4)) & 0x100)
+		if (((e8080.A>>4) + 6) > 15)
 			e8080.F |= FLAG_CARRY;
 		e8080.A += (6 << 4);
 	}
-
-	setFlags(e8080.A, FLAG_ZERO | FLAG_SIGN | FLAG_PARITY);
 }
 
 void INR (uint8_t opcode)
@@ -163,18 +160,16 @@ void DCR (uint8_t opcode)
 	int dst = (opcode >> 3) & 0x7;
 	uint16_t tmp = readReg(dst) - 1;
 	setFlags(tmp, FLAG_SIGN | FLAG_ZERO | FLAG_PARITY);
-	if ((readReg(dst) & 0xf) > (tmp & 0xf)) {
+	if ((readReg(dst) & 0xf) > (tmp & 0xf))
 		e8080.F |= FLAG_ACARRY;
-	}
-	else {
+	else
 		e8080.F &= ~FLAG_ACARRY;
-	}
 	writeReg(tmp, dst);
 }
 
 void CMA (uint8_t opcode)
 {
-	e8080.A = 0xff ^ e8080.A;
+	e8080.A = ~e8080.A;
 }
 
 void NOP (uint8_t opcode)
@@ -207,8 +202,9 @@ void ADD (uint8_t opcode)
 {
 	int src = (opcode & 0x7);
 	uint8_t srcVal = readReg(src);
-	setFlags(e8080.A + srcVal, FLAG_SIGN | FLAG_ZERO | FLAG_ACARRY | FLAG_PARITY | FLAG_CARRY);
-	e8080.A += srcVal;
+	uint16_t tmp = e8080.A + srcVal;
+	setFlags(tmp, FLAG_SIGN | FLAG_ZERO | FLAG_ACARRY | FLAG_PARITY | FLAG_CARRY);
+	e8080.A = tmp;
 }
 
 void ADC (uint8_t opcode)
@@ -217,24 +213,35 @@ void ADC (uint8_t opcode)
 	uint8_t srcVal = readReg(src);
 	uint16_t tmp = e8080.A + srcVal + !!(e8080.F & FLAG_CARRY);
 	setFlags(tmp, FLAG_SIGN | FLAG_ZERO | FLAG_ACARRY | FLAG_PARITY | FLAG_CARRY);
-	e8080.A = tmp&0xff;
+	e8080.A = tmp;
 }
 
 void SUB (uint8_t opcode)
 {
 	int src = (opcode & 0x7);
 	uint8_t srcVal = readReg(src);
-	setFlags(e8080.A - srcVal, FLAG_SIGN | FLAG_ZERO | FLAG_ACARRY | FLAG_PARITY | FLAG_CARRY);
-	e8080.A -= srcVal;
+	uint16_t tmp = e8080.A - srcVal;
+	setFlags(tmp, FLAG_SIGN | FLAG_ZERO | FLAG_PARITY | FLAG_CARRY);
+	// if ((readReg(src)&0xf) > (tmp&0xf))
+	if (~(tmp ^ e8080.A ^ srcVal) & 0x10)
+		e8080.F |= FLAG_ACARRY;
+	else
+		e8080.F &= ~FLAG_ACARRY;
+	e8080.A = tmp;
 }
 
 void SBB (uint8_t opcode)
 {
 	int src = (opcode & 0x7);
 	uint8_t srcVal = readReg(src);
-	uint16_t tmp = e8080.A - (srcVal + !!(e8080.F & FLAG_CARRY));
-	setFlags(tmp, FLAG_SIGN | FLAG_ZERO | FLAG_ACARRY | FLAG_PARITY | FLAG_CARRY);
-	e8080.A = tmp&0xff;
+	uint16_t tmp = e8080.A - srcVal - !!(e8080.F & FLAG_CARRY);
+	setFlags(tmp, FLAG_SIGN | FLAG_ZERO | FLAG_PARITY | FLAG_CARRY);
+	// if ((readReg(src)&0xf) > (tmp&0xf))
+	if (~(tmp ^ e8080.A ^ srcVal) & 0x10)
+		e8080.F |= FLAG_ACARRY;
+	else
+		e8080.F &= ~FLAG_ACARRY;
+	e8080.A = tmp;
 }
 
 void ANA (uint8_t opcode)
@@ -256,8 +263,8 @@ void XRA (uint8_t opcode)
 	uint8_t srcVal = readReg(src);
 	setFlags(e8080.A ^ srcVal, FLAG_SIGN | FLAG_ZERO | FLAG_PARITY);
 	e8080.F &= ~FLAG_CARRY;
-	e8080.A ^= srcVal;
 	e8080.F &= ~FLAG_ACARRY;
+	e8080.A ^= srcVal;
 }
 
 void ORA (uint8_t opcode)
@@ -266,15 +273,21 @@ void ORA (uint8_t opcode)
 	uint8_t srcVal = readReg(src);
 	setFlags(e8080.A | srcVal, FLAG_SIGN | FLAG_ZERO | FLAG_PARITY);
 	e8080.F &= ~FLAG_CARRY;
-	e8080.A |= srcVal;
 	e8080.F &= ~FLAG_ACARRY;
+	e8080.A |= srcVal;
 }
 
 void CMP (uint8_t opcode)
 {
 	int src = (opcode & 0x7);
 	uint8_t srcVal = readReg(src);
-	setFlags(e8080.A - srcVal, FLAG_SIGN | FLAG_ZERO | FLAG_ACARRY | FLAG_PARITY | FLAG_CARRY);
+	uint16_t tmp = e8080.A - srcVal;
+	setFlags(tmp, FLAG_SIGN | FLAG_ZERO | FLAG_PARITY | FLAG_CARRY);
+	// if ((readReg(src)&0xf) > (tmp&0xf))
+	if (~(tmp ^ e8080.A ^ srcVal) & 0x10)
+		e8080.F |= FLAG_ACARRY;
+	else
+		e8080.F &= ~FLAG_ACARRY;
 }
 
 void RLC (uint8_t opcode)
@@ -322,7 +335,7 @@ void PUSH (uint8_t opcode)
 		case 0x02:
 			stackPush(e8080.HL); break;
 		case 0x03:
-			stackPush(e8080.AF); break;
+			stackPush((e8080.AF & 0xFFD7) | 0x02); break;
 		default:
 			assert(0);
 	}
@@ -467,46 +480,42 @@ void MVI (uint8_t opcode)
 void ADI (uint8_t opcode)
 {
 	uint8_t imm = fetch8();
-	setFlags(e8080.A + imm, FLAG_SIGN | FLAG_ZERO | FLAG_ACARRY | FLAG_PARITY | FLAG_CARRY);
-	e8080.A += imm;
+	uint16_t tmp = e8080.A + imm;
+	setFlags(tmp, FLAG_ACARRY | FLAG_SIGN | FLAG_ZERO | FLAG_PARITY | FLAG_CARRY);
+	e8080.A = tmp;
 }
 
 void ACI (uint8_t opcode)
 {
 	uint8_t imm = fetch8();
 	uint16_t tmp = e8080.A + imm + !!(e8080.F & FLAG_CARRY);
-	setFlags(tmp, FLAG_SIGN | FLAG_ZERO | FLAG_ACARRY | FLAG_PARITY | FLAG_CARRY);
+	setFlags(tmp, FLAG_ACARRY | FLAG_SIGN | FLAG_ZERO | FLAG_PARITY | FLAG_CARRY);
 	e8080.A = tmp;
 }
 
 void SUI (uint8_t opcode)
 {
 	uint8_t imm = fetch8();
-	setFlags(e8080.A - imm, FLAG_SIGN | FLAG_ZERO | FLAG_PARITY);
-	if ((e8080.A - imm) > 0xFF)
-		e8080.F &= ~FLAG_CARRY;
-	else
-		e8080.F |= FLAG_CARRY;
-	if (((e8080.A - imm) & 0xF) > (e8080.A&0xF))
-		e8080.F &= ~FLAG_ACARRY;
-	else
+	uint16_t tmp = e8080.A - imm;
+	setFlags(tmp, FLAG_CARRY | FLAG_SIGN | FLAG_ZERO | FLAG_PARITY);
+	// if ((e8080.A&0xf) > (tmp&0xf))
+	if (~(tmp ^ e8080.A ^ imm) & 0x10)
 		e8080.F |= FLAG_ACARRY;
-	e8080.A -= imm;
+	else
+		e8080.F &= ~FLAG_ACARRY;
+	e8080.A = tmp;
 }
 
 void SBI (uint8_t opcode)
 {
 	uint8_t imm = fetch8();
 	uint16_t tmp = e8080.A - imm - !!(e8080.F & FLAG_CARRY);
-	setFlags(tmp, FLAG_SIGN | FLAG_ZERO | FLAG_PARITY);
-	if ((e8080.A - imm) > 0xFF)
-		e8080.F &= ~FLAG_CARRY;
-	else
-		e8080.F |= FLAG_CARRY;
-	if (((e8080.A - imm) & 0xF) > (e8080.A&0xF))
-		e8080.F &= ~FLAG_ACARRY;
-	else
+	setFlags(tmp, FLAG_CARRY | FLAG_SIGN | FLAG_ZERO | FLAG_PARITY);
+	// if ((e8080.A&0xf) > (tmp&0xf))
+	if (~(tmp ^ e8080.A ^ imm) & 0x10)
 		e8080.F |= FLAG_ACARRY;
+	else
+		e8080.F &= ~FLAG_ACARRY;
 	e8080.A = tmp;
 }
 
@@ -543,17 +552,12 @@ void ORI (uint8_t opcode)
 void CPI (uint8_t opcode)
 {
 	uint8_t imm = fetch8();
-	// setFlags(e8080.A - imm, FLAG_SIGN | FLAG_ZERO | FLAG_ACARRY | FLAG_PARITY | FLAG_CARRY);
-	setFlags(e8080.A - imm, FLAG_SIGN | FLAG_ZERO | FLAG_PARITY);
-	setFlags(e8080.A + ~imm + 1, FLAG_CARRY | FLAG_ACARRY);
-	// if ((e8080.A - imm) > 0xFF)
-	// 	e8080.F &= ~FLAG_CARRY;
-	// else
-	// 	e8080.F |= FLAG_CARRY;
-	// if (((e8080.A - imm) & 0xF) > (e8080.A&0xF))
-	// 	e8080.F &= ~FLAG_ACARRY;
-	// else
-	// 	e8080.F |= FLAG_ACARRY;
+	uint16_t tmp = e8080.A - imm;
+	setFlags(tmp, FLAG_SIGN | FLAG_ZERO | FLAG_PARITY | FLAG_CARRY);
+	if (~(tmp ^ e8080.A ^ imm) & 0x10)
+		e8080.F |= FLAG_ACARRY;
+	else
+		e8080.F &= ~FLAG_ACARRY;
 }
 
 void STA (uint8_t opcode)

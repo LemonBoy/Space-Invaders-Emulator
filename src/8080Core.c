@@ -48,11 +48,9 @@ int emulate8080 (int cycles)
 		
 		uint8_t opcode = fetch8();
 #ifdef DEBUG		
-		if (e8080.PC - 1 == 0x1A5B)
-			dumpRegisters();
 		// if (e8080.PC >= 0x100 && e8080.PC < 0x6B0)
 		// if (e8080.PC >= 0x1000)
-		printf("[%04x] %02x %s\n", e8080.PC - 1, opcode, lut_mnemonic[opcode]);	
+		// printf("[%04x] %02x %s\n", e8080.PC - 1, opcode, lut_mnemonic[opcode]);	
 #endif
 		
 		opTbl[opcode].execute (opcode);

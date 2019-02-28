@@ -57,7 +57,6 @@ void writeByte (uint8_t value, uint16_t offset)
 		if (bank->is_mirror &&
 		    offset >= bank->base && offset < bank->base + bank->size) {
 			// Translate to its base address
-			uint16_t old = offset;
 			int d = bank->mirror != 0 ? bank->mirror : bank->size;
 			offset = (offset % d) + bank->mirror;
 			// Re-scan
@@ -88,7 +87,6 @@ uint8_t readByte (uint16_t offset)
 		if (bank->is_mirror &&
 		    offset >= bank->base && offset < bank->base + bank->size) {
 			// Translate to its base address
-			uint16_t old = offset;
 			int d = bank->mirror != 0 ? bank->mirror : bank->size;
 			offset = (offset % d) + bank->mirror;
 			// Re-scan
